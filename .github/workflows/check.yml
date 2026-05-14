@@ -1,0 +1,54 @@
+name: DG Hot Wheels Inventory Check
+
+on:
+  schedule:
+    # Every 6 hours (UTC). Adjust the cron if you want a different cadence.
+    - cron: "0 */6 * * *"
+  workflow_dispatch: {}  # lets you run it manually from the Actions tab
+
+permissions:
+  contents: write  # allows committing the updated report + history back
+
+concurrency:
+  group: dg-check
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          python -m playwright install --with-deps chromium
+
+      - name: Run inventory check
+        env:
+          CI: "true"
+          DG_ZIP: ${{ secrets.DG_ZIP }}
+        run: python checker.py
+
+      - name: Publish report
+        run: |
+          mkdir -p docs
+          cp report.html docs/index.html
+
+      - name: Commit results
+        run: |
+          git config user.name "dg-hotwheels-bot"
+          git config user.email "actions@github.com"
+          git add docs/index.html data/history.json
+          if git diff --staged --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "Inventory check $(date -u '+%Y-%m-%d %H:%M UTC')"
+            git push
+          fi

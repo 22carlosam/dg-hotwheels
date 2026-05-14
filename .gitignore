@@ -1,0 +1,4 @@
+data/session_cache.json
+report.html
+__pycache__/
+*.pyc

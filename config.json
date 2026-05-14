@@ -1,0 +1,10 @@
+{
+  "zip_code": "",
+  "radius_miles": 10,
+  "upcs": [
+    {"upc": "27084412086", "name": "Hot Wheels Basic Play Car"},
+    {"upc": "27084480665", "name": "Hot Wheels Basic Car"},
+    {"upc": "887961761382", "name": "Hot Wheels 5-Pack"},
+    {"upc": "887961928105", "name": "Hot Wheels Monster Truck"}
+  ]
+}
