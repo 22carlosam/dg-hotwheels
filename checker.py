@@ -258,6 +258,10 @@ def build_report(snapshot, previous, config):
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="refresh" content="600">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <title>DG Hot Wheels Inventory</title>
 <style>
   *, *::before, *::after {{ box-sizing: border-box; }}
@@ -313,6 +317,11 @@ def build_report(snapshot, previous, config):
     <strong>Checked:</strong> {ts} &nbsp;|&nbsp; <strong>ZIP:</strong> {config['zip_code']} &nbsp;|&nbsp; <strong>Radius:</strong> {config['radius_miles']} mi<br>
     {prev_line}
   </div>
+  <button onclick="location.replace(location.pathname + '?t=' + Date.now())"
+          style="margin-top:10px;padding:8px 16px;font-size:0.9rem;font-weight:600;
+                 color:#fff;background:#c41230;border:none;border-radius:6px;cursor:pointer">
+    ↻ Refresh
+  </button>
 </header>
 
 <div class="summary">
