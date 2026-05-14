@@ -2,8 +2,9 @@ name: DG Hot Wheels Inventory Check
 
 on:
   schedule:
-    # Every 6 hours (UTC). Adjust the cron if you want a different cadence.
-    - cron: "0 */6 * * *"
+    # Every 6 hours at :17 past (UTC). Off the top of the hour to avoid
+    # GitHub's busiest scheduling window. Adjust if you want a different cadence.
+    - cron: "17 */6 * * *"
   workflow_dispatch: {}  # lets you run it manually from the Actions tab
 
 permissions:

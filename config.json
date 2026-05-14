@@ -2,9 +2,10 @@
   "zip_code": "",
   "radius_miles": 10,
   "upcs": [
-    {"upc": "27084412086", "name": "Hot Wheels Basic Play Car"},
-    {"upc": "27084480665", "name": "Hot Wheels Basic Car"},
+    {"upc": "27084412086", "name": "Hot Wheels Basic Car (singles)"},
     {"upc": "887961761382", "name": "Hot Wheels 5-Pack"},
-    {"upc": "887961928105", "name": "Hot Wheels Monster Truck"}
+    {"upc": "887961644869", "name": "Hot Wheels Classic Stunt Cars"},
+    {"upc": "746775305086", "name": "Hot Wheels Character Cars"},
+    {"upc": "29116400122", "name": "Hot Wheels 30 Car Case"}
   ]
 }
