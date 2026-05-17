@@ -169,10 +169,72 @@ def _inventory_status_label(code):
     return {1: "In Stock", 2: "Low", 3: "In Stock", 0: "Out"}.get(code, f"Status {code}")
 
 
-def build_report(snapshot, previous, config):
+def _walk_restock_history(history, upcs):
+    """
+    Walk every consecutive pair of snapshots and find quantity increases.
+    Returns:
+      events:  list of {ts, store, addr, distance, upc, name, prev, new, delta},
+               sorted newest first.
+      last_by: dict keyed by (storeNumber, upc) -> the most recent event for that pair.
+    """
+    upc_names = {u["upc"]: u["name"] for u in upcs}
+    sorted_ts = sorted(history.keys())
+    events = []
+    last_by = {}
+    for i in range(1, len(sorted_ts)):
+        a, b = sorted_ts[i - 1], sorted_ts[i]
+        prev_qty = {}
+        for u in history[a].get("upcs", []):
+            for s in u.get("stores", []):
+                prev_qty[(s["storeNumber"], u["upc"])] = s["productQTY"]
+        for u in history[b].get("upcs", []):
+            if u["upc"] not in upc_names:
+                continue
+            for s in u.get("stores", []):
+                key = (s["storeNumber"], u["upc"])
+                p = prev_qty.get(key)
+                if p is not None and s["productQTY"] > p:
+                    ev = {
+                        "ts": b,
+                        "store": s["storeNumber"],
+                        "addr": f"{s['address']}, {s['city']}, {s['state']}",
+                        "distance": s["distance"],
+                        "upc": u["upc"],
+                        "name": upc_names[u["upc"]],
+                        "prev": p,
+                        "new": s["productQTY"],
+                        "delta": s["productQTY"] - p,
+                    }
+                    events.append(ev)
+                    last_by[key] = ev
+    events.sort(key=lambda e: e["ts"], reverse=True)
+    return events, last_by
+
+
+def _short_date(ts_str):
+    """'2026-05-15 06:17:32' -> 'May 15'."""
+    try:
+        return datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S").strftime("%b %d")
+    except Exception:
+        return ts_str[:10]
+
+
+def _short_datetime(ts_str):
+    """'2026-05-15 06:17:32' -> 'May 15 06:17'."""
+    try:
+        return datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S").strftime("%b %d %H:%M")
+    except Exception:
+        return ts_str
+
+
+def build_report(snapshot, previous, config, history=None):
     upcs = config.get("upcs", [])
     ts = snapshot["timestamp"]
     prev_ts = previous["timestamp"] if previous else None
+
+    # Walk all of history for restock events (last increase per store/item)
+    history = history or {}
+    restock_events, last_increase = _walk_restock_history(history, upcs)
 
     # Index current stores: upc -> storeNumber -> store dict
     current_idx = {}
@@ -225,7 +287,14 @@ def build_report(snapshot, previous, config):
                 badge = '<span class="badge eq">=</span>'
                 css = "cell-eq"
 
-            cells.append(f'<td class="{css}"><strong>{qty}</strong> {badge}</td>')
+            # If history shows an earlier restock for this store/item, surface it.
+            last_ev = last_increase.get((snum, upc))
+            sub = ""
+            if last_ev and last_ev["ts"] != ts:
+                sub = (f'<br><span class="last-up" title="{last_ev["prev"]} → {last_ev["new"]}">'
+                       f'last ↑ {_short_date(last_ev["ts"])}</span>')
+
+            cells.append(f'<td class="{css}"><strong>{qty}</strong> {badge}{sub}</td>')
 
         row_class = "row-highlight" if row_has_increase else ""
         addr = f"{s['address']}, {s['city']}, {s['state']}"
@@ -252,6 +321,24 @@ def build_report(snapshot, previous, config):
             current_idx[upc][snum]["productQTY"] > prev_idx[upc][snum]
         ))()
     )
+
+    # Recent restocks panel: top N events across all of history
+    recent_window = len(history)
+    if restock_events:
+        items = []
+        for ev in restock_events[:15]:
+            items.append(
+                f'<li>'
+                f'<span class="when">{_short_datetime(ev["ts"])}</span>'
+                f'<span><strong>#{ev["store"]}</strong> '
+                f'({ev["addr"].split(",")[1].strip()}, {ev["distance"]:.1f} mi)</span>'
+                f'<span>{ev["name"]}:</span>'
+                f'<span class="delta">{ev["prev"]} → {ev["new"]} (+{ev["delta"]})</span>'
+                f'</li>'
+            )
+        restocks_html = f'<ul>{"".join(items)}</ul>'
+    else:
+        restocks_html = '<div class="empty">No restocks recorded yet in stored history.</div>'
 
     html = f"""<!DOCTYPE html>
 <html lang="en">
@@ -308,6 +395,21 @@ def build_report(snapshot, previous, config):
   .cell-dn   {{ background: #fff5f5; }}
   .cell-none {{ color: #ccc; }}
   .leg-item  {{ display: flex; align-items: center; gap: 5px; }}
+  .last-up   {{ display: inline-block; margin-top: 2px; font-size: 0.72rem; color: #2e7d32; }}
+  .restocks  {{
+    background: white; border-radius: 10px; padding: 14px 16px;
+    margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,.1);
+  }}
+  .restocks h2 {{ margin: 0 0 10px; font-size: 1rem; color: #2e7d32; }}
+  .restocks ul {{ list-style: none; margin: 0; padding: 0; }}
+  .restocks li {{
+    padding: 6px 0; border-bottom: 1px solid #f3f3f3;
+    font-size: 0.85rem; display: flex; gap: 8px; flex-wrap: wrap;
+  }}
+  .restocks li:last-child {{ border-bottom: none; }}
+  .restocks .when {{ color: #555; font-variant-numeric: tabular-nums; min-width: 95px; }}
+  .restocks .delta {{ color: #2e7d32; font-weight: 600; }}
+  .restocks .empty {{ color: #999; font-size: 0.85rem; }}
 </style>
 </head>
 <body>
@@ -329,12 +431,18 @@ def build_report(snapshot, previous, config):
   <div class="stat"><div class="num" style="color:#2e7d32">{increases}</div><div class="lbl">Inventory increases</div></div>
 </div>
 
+<div class="restocks">
+  <h2>📦 Recent restocks (last {recent_window} runs)</h2>
+  {restocks_html}
+</div>
+
 <div class="legend">
   <span class="leg-item"><span class="badge up">▲ N</span> Increased vs last check</span>
   <span class="leg-item"><span class="badge dn">▼ N</span> Decreased</span>
   <span class="leg-item"><span class="badge eq">=</span> Unchanged</span>
   <span class="leg-item"><span class="badge new">NEW</span> New store or first check</span>
   <span class="leg-item" style="background:#fffde7;padding:2px 6px;border-radius:4px">Yellow row = at least one increase</span>
+  <span class="leg-item"><span class="last-up">last ↑ May X</span> Most recent restock for that cell</span>
 </div>
 
 <div class="tbl-wrap">
@@ -430,7 +538,7 @@ def main():
     save_snapshot(history, snapshot)
     history[ts] = snapshot
     previous = get_previous_snapshot(history, ts)
-    build_report(snapshot, previous, config)
+    build_report(snapshot, previous, config, history=history)
     open_report()
     print("Done!")
 
