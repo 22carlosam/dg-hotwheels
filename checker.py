@@ -227,6 +227,49 @@ def _short_datetime(ts_str):
         return ts_str
 
 
+def _steady_since(history, current_ts):
+    """
+    For each (storeNumber, upc) pair in the snapshot at current_ts, find the
+    earliest consecutive prior snapshot where the quantity equaled the current
+    value. Returns {(store, upc): earliest_ts_at_current_qty}.
+    """
+    sorted_ts = sorted(history.keys())
+    if current_ts not in sorted_ts:
+        return {}
+    idx_cur = sorted_ts.index(current_ts)
+
+    snaps = {}
+    for ts in sorted_ts:
+        snaps[ts] = {
+            (s["storeNumber"], u["upc"]): s["productQTY"]
+            for u in history[ts].get("upcs", [])
+            for s in u.get("stores", [])
+        }
+
+    current = snaps[current_ts]
+    result = {}
+    for key, q in current.items():
+        earliest = current_ts
+        for j in range(idx_cur - 1, -1, -1):
+            ts = sorted_ts[j]
+            if snaps[ts].get(key) == q:
+                earliest = ts
+            else:
+                break
+        result[key] = earliest
+    return result
+
+
+def _format_steady(seconds):
+    """Format a duration in seconds as '2d steady' / '12h steady'."""
+    if seconds < 3600:
+        return None  # less than an hour — no useful info
+    days = seconds / 86400
+    if days >= 1:
+        return f"{int(round(days))}d steady"
+    return f"{int(round(seconds / 3600))}h steady"
+
+
 def build_report(snapshot, previous, config, history=None):
     upcs = config.get("upcs", [])
     ts = snapshot["timestamp"]
@@ -235,6 +278,8 @@ def build_report(snapshot, previous, config, history=None):
     # Walk all of history for restock events (last increase per store/item)
     history = history or {}
     restock_events, last_increase = _walk_restock_history(history, upcs)
+    steady_at = _steady_since(history, ts)
+    fmt = "%Y-%m-%d %H:%M:%S"
 
     # Index current stores: upc -> storeNumber -> store dict
     current_idx = {}
@@ -287,12 +332,23 @@ def build_report(snapshot, previous, config, history=None):
                 badge = '<span class="badge eq">=</span>'
                 css = "cell-eq"
 
-            # If history shows an earlier restock for this store/item, surface it.
+            # Build subtext: last restock date + how long current qty has been steady
+            sub_parts = []
             last_ev = last_increase.get((snum, upc))
-            sub = ""
             if last_ev and last_ev["ts"] != ts:
-                sub = (f'<br><span class="last-up" title="{last_ev["prev"]} → {last_ev["new"]}">'
-                       f'last ↑ {_short_date(last_ev["ts"])}</span>')
+                sub_parts.append(
+                    f'<span class="last-up" title="{last_ev["prev"]} → {last_ev["new"]}">'
+                    f'last ↑ {_short_date(last_ev["ts"])}</span>'
+                )
+            # Only show steady if qty didn't just change this run
+            if qty == prev_qty:
+                earliest = steady_at.get((snum, upc))
+                if earliest and earliest != ts:
+                    secs = (datetime.strptime(ts, fmt) - datetime.strptime(earliest, fmt)).total_seconds()
+                    label = _format_steady(secs)
+                    if label:
+                        sub_parts.append(f'<span class="steady">{label}</span>')
+            sub = ("<br>" + " · ".join(sub_parts)) if sub_parts else ""
 
             cells.append(f'<td class="{css}"><strong>{qty}</strong> {badge}{sub}</td>')
 
@@ -396,6 +452,7 @@ def build_report(snapshot, previous, config, history=None):
   .cell-none {{ color: #ccc; }}
   .leg-item  {{ display: flex; align-items: center; gap: 5px; }}
   .last-up   {{ display: inline-block; margin-top: 2px; font-size: 0.72rem; color: #2e7d32; }}
+  .steady    {{ display: inline-block; margin-top: 2px; font-size: 0.72rem; color: #777; }}
   .restocks  {{
     background: white; border-radius: 10px; padding: 14px 16px;
     margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,.1);
@@ -443,6 +500,7 @@ def build_report(snapshot, previous, config, history=None):
   <span class="leg-item"><span class="badge new">NEW</span> New store or first check</span>
   <span class="leg-item" style="background:#fffde7;padding:2px 6px;border-radius:4px">Yellow row = at least one increase</span>
   <span class="leg-item"><span class="last-up">last ↑ May X</span> Most recent restock for that cell</span>
+  <span class="leg-item"><span class="steady">Nd steady</span> How long current qty has held</span>
 </div>
 
 <div class="tbl-wrap">
