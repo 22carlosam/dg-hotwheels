@@ -601,6 +601,18 @@ def main():
     print("DG Hot Wheels Inventory Checker")
     print("=" * 40)
 
+    # Test-alert mode: fire a fake Discord notification then exit.
+    if os.environ.get("TEST_ALERT", "").lower() in ("true", "1", "yes"):
+        print("TEST_ALERT mode — sending a fake restock notification...")
+        fake = [{
+            "store": 9999, "addr": "123 Test Street, Test City, TS", "distance": 0.0,
+            "name": "🧪 Test Hot Wheels Item",
+            "prev": 1, "new": 99, "delta": 98,
+        }]
+        notify_discord(fake, report_url=os.environ.get("REPORT_URL"))
+        print("Done — check Discord.")
+        return
+
     config = load_config()
     zip_code = config["zip_code"]
     radius = config.get("radius_miles", 10)

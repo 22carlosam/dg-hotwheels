@@ -5,7 +5,12 @@ on:
     # Every 6 hours at :17 past (UTC). Off the top of the hour to avoid
     # GitHub's busiest scheduling window. Adjust if you want a different cadence.
     - cron: "17 */6 * * *"
-  workflow_dispatch: {}  # lets you run it manually from the Actions tab
+  workflow_dispatch:
+    inputs:
+      test_alert:
+        description: "Send a fake Discord alert instead of running the real check"
+        type: boolean
+        default: false
 
 permissions:
   contents: write  # allows committing the updated report + history back
@@ -37,14 +42,17 @@ jobs:
           DG_ZIP: ${{ secrets.DG_ZIP }}
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
           REPORT_URL: "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/"
+          TEST_ALERT: ${{ inputs.test_alert }}
         run: python checker.py
 
       - name: Publish report
+        if: ${{ !inputs.test_alert }}
         run: |
           mkdir -p docs
           cp report.html docs/index.html
 
       - name: Commit results
+        if: ${{ !inputs.test_alert }}
         run: |
           git config user.name "dg-hotwheels-bot"
           git config user.email "actions@github.com"
