@@ -169,6 +169,64 @@ def _inventory_status_label(code):
     return {1: "In Stock", 2: "Low", 3: "In Stock", 0: "Out"}.get(code, f"Status {code}")
 
 
+def _restocks_vs_previous(snapshot, previous, upcs):
+    """Find quantity increases in the current snapshot vs the previous one."""
+    if not previous:
+        return []
+    upc_names = {u["upc"]: u["name"] for u in upcs}
+    prev_qty = {}
+    for u in previous.get("upcs", []):
+        for s in u.get("stores", []):
+            prev_qty[(s["storeNumber"], u["upc"])] = s["productQTY"]
+    events = []
+    for u in snapshot.get("upcs", []):
+        if u["upc"] not in upc_names:
+            continue
+        for s in u.get("stores", []):
+            key = (s["storeNumber"], u["upc"])
+            p = prev_qty.get(key)
+            if p is not None and s["productQTY"] > p:
+                events.append({
+                    "store": s["storeNumber"],
+                    "addr": f"{s['address']}, {s['city']}, {s['state']}",
+                    "distance": s["distance"],
+                    "name": upc_names[u["upc"]],
+                    "prev": p,
+                    "new": s["productQTY"],
+                    "delta": s["productQTY"] - p,
+                })
+    return events
+
+
+def notify_discord(events, report_url=None):
+    """POST a Discord webhook for each new restock event, if DISCORD_WEBHOOK is set."""
+    webhook = os.environ.get("DISCORD_WEBHOOK", "").strip()
+    if not webhook:
+        return
+    if not events:
+        return
+    embeds = []
+    for ev in events[:10]:  # Discord caps embeds per message at 10
+        embeds.append({
+            "title": f"🚗 Restock: {ev['name']}",
+            "description": (
+                f"**Store #{ev['store']}** · {ev['distance']:.1f} mi\n"
+                f"{ev['addr']}\n"
+                f"Quantity: **{ev['prev']} → {ev['new']}**  (+{ev['delta']})"
+            ),
+            "color": 0x2E7D32,
+        })
+    payload = {"embeds": embeds}
+    if report_url:
+        payload["content"] = f"📦 {len(events)} restock(s) detected — [open report]({report_url})"
+    try:
+        r = requests.post(webhook, json=payload, timeout=10)
+        r.raise_for_status()
+        print(f"Discord: sent {len(events)} restock notification(s)")
+    except Exception as e:
+        print(f"Discord notification failed: {e}")
+
+
 def _walk_restock_history(history, upcs):
     """
     Walk every consecutive pair of snapshots and find quantity increases.
@@ -596,6 +654,12 @@ def main():
     save_snapshot(history, snapshot)
     history[ts] = snapshot
     previous = get_previous_snapshot(history, ts)
+
+    new_restocks = _restocks_vs_previous(snapshot, previous, upcs)
+    if new_restocks:
+        print(f"Restocks this run: {len(new_restocks)}")
+        notify_discord(new_restocks, report_url=os.environ.get("REPORT_URL"))
+
     build_report(snapshot, previous, config, history=history)
     open_report()
     print("Done!")
