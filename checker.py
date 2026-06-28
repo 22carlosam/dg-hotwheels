@@ -670,7 +670,17 @@ def main():
     new_restocks = _restocks_vs_previous(snapshot, previous, upcs)
     if new_restocks:
         print(f"Restocks this run: {len(new_restocks)}")
-        notify_discord(new_restocks, report_url=os.environ.get("REPORT_URL"))
+        # If the previous snapshot is more than 24h old, the comparison is
+        # likely catching up after an outage — skip notifications to avoid
+        # spamming, but still write the snapshot to re-baseline.
+        fmt = "%Y-%m-%d %H:%M:%S"
+        gap_hours = 0
+        if previous:
+            gap_hours = (datetime.strptime(ts, fmt) - datetime.strptime(previous["timestamp"], fmt)).total_seconds() / 3600
+        if gap_hours > 24:
+            print(f"Skipping Discord — previous snapshot is {gap_hours:.1f}h old (re-baselining).")
+        else:
+            notify_discord(new_restocks, report_url=os.environ.get("REPORT_URL"))
 
     build_report(snapshot, previous, config, history=history)
     open_report()

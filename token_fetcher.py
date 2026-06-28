@@ -2,17 +2,38 @@
 """
 Fetches a fresh Dollar General guest session by loading dollargeneral.com
 in a headless browser and reading the auth cookies DG's JavaScript mints.
+
+DG's site (as of mid-2026) packs the JWT, app session token, and customer
+GUID into the single `omniSession` cookie, formatted as:
+    appSessionToken|customerGuid|null|false|JWT
+The static app credentials are hardcoded into DG's web bundle and don't
+rotate per session, so we treat them as constants.
 """
 
 import time
 
+# Static, public app identifiers from DG's web bundle. These are the same
+# for every guest session — they're not secrets, just client identifiers.
+APP_TOKEN = "6dinqus4908fkssw9h7aa8ldcgkimn3p"
+PARTNER_API_TOKEN = "11619A82-8E80-4A6F-8AD2-A14F4A8FFD74"
 
-# Cookie names DG sets that we need for API calls
-NEEDED = ["idToken", "customerGuid", "uniqueDeviceId", "appSessionToken",
-          "appToken", "partnerApiToken"]
+
+def _parse_omni_session(value):
+    """omniSession = 'appSessionToken|customerGuid|null|false|JWT'."""
+    parts = value.split("|")
+    if len(parts) < 5:
+        return None
+    app_session_token, customer_guid, _, _, jwt = parts[0], parts[1], parts[2], parts[3], "|".join(parts[4:])
+    if not jwt.startswith("eyJ"):
+        return None
+    return {
+        "appSessionToken": app_session_token,
+        "customerGuid": customer_guid,
+        "idToken": jwt,
+    }
 
 
-def fetch_session(timeout_s=30, headless=True):
+def fetch_session(timeout_s=45, headless=True):
     """
     Returns a dict with idToken + the x-dg-* header values, or raises RuntimeError.
     """
@@ -29,30 +50,35 @@ def fetch_session(timeout_s=30, headless=True):
         page.goto("https://www.dollargeneral.com/", wait_until="domcontentloaded",
                   timeout=timeout_s * 1000)
 
-        # DG's JS mints the session cookies a moment after load. Poll for idToken.
+        # Poll for the omniSession cookie containing a JWT.
         deadline = time.time() + timeout_s
-        cookies = {}
+        parsed = None
+        device_id = ""
         while time.time() < deadline:
             cookies = {c["name"]: c["value"] for c in ctx.cookies()}
-            if cookies.get("idToken"):
-                break
+            device_id = cookies.get("uniqueDeviceId", device_id)
+            omni = cookies.get("omniSession")
+            if omni:
+                parsed = _parse_omni_session(omni)
+                if parsed and device_id:
+                    break
             page.wait_for_timeout(500)
 
         browser.close()
 
-    if not cookies.get("idToken"):
+    if not parsed:
         raise RuntimeError(
             "Could not obtain a session token from dollargeneral.com. "
             "DG may have changed their site, or the page failed to load."
         )
 
     return {
-        "idToken": cookies["idToken"],
-        "customerGuid": cookies.get("customerGuid", ""),
-        "deviceId": cookies.get("uniqueDeviceId", ""),
-        "appSessionToken": cookies.get("appSessionToken", ""),
-        "appToken": cookies.get("appToken", ""),
-        "partnerApiToken": cookies.get("partnerApiToken", ""),
+        "idToken": parsed["idToken"],
+        "customerGuid": parsed["customerGuid"],
+        "deviceId": device_id,
+        "appSessionToken": parsed["appSessionToken"],
+        "appToken": APP_TOKEN,
+        "partnerApiToken": PARTNER_API_TOKEN,
     }
 
 
